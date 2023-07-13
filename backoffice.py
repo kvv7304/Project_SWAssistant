@@ -1,0 +1,589 @@
+import datetime
+import html
+import io
+import os
+import sqlite3
+import traceback
+from io import BytesIO
+
+import pandas as pd
+from anticaptchaofficial.imagecaptcha import *
+from bs4 import BeautifulSoup
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from tqdm import tqdm
+
+from config import *
+
+
+def bypass_captcha(session):
+    solver = imagecaptcha()
+    solver.set_verbose(0)  # Установите уровень отладки на 0, чтобы отключить сообщения работы
+    while True:
+        try:
+            solver.set_key(captcha_key)
+            img = session.get("https://ru.siberianhealth.com/ru/captcha/default/")
+            captcha_content = BytesIO(img.content)
+            captcha_text = solver.solve_and_return_solution(file_path=None, body=captcha_content.read())
+            return captcha_text
+        except:
+            pass
+
+def auth(user, url="https://ru.siberianhealth.com/ru/backoffice-new/?newStyle=yes"):
+    payload = {
+        "login": f"{ user['number']}",
+        "pass": f"{user['password']}",
+        "url": url,
+        "_controller": "Backoffice_Auth/submit",
+        "_url": "https://ru.siberianhealth.com/ru/backoffice/auth/?url=https://ru.siberianhealth.com/ru/backoffice-new/?newStyle=yes"
+    }
+    with requests.Session() as session:
+        while True :
+            response = session.post(url=url_ajax, data=payload, allow_redirects=True)
+            response_json = response.json()
+            if response_json['result']['status'] == "Denied":
+                payload["captcha"] = bypass_captcha(session)
+            else:
+                break
+        if response_json['result']['success'] and "Стать Бизнес-Партнером" not in session.get(url=url).text:
+            return session
+        elif "Стать Бизнес-Партнером" in session.get(url=url).text:
+            return f"{ user['number']} нужно стать Бизнес-Партнером"
+        else:
+            return f"{ user['number']} {response_json['result']['status']}"
+
+
+
+def extract_data(url, session) -> list:
+    response = session.get(url=url, allow_redirects=True)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    data_list = []
+    for a in soup.find_all('a', {'class': 'officeReportBuySKUDetailBtn'}):
+        key = a.get('data-key')
+        group = a.get('data-group')
+        data = {"key": key, "group": group}
+        data_list.append(data)
+
+    return data_list
+
+def get_first_day_of_month():
+    return datetime.date.today().strftime('%Y-%m-01')
+
+def buy_sku2_get_detail(id, data_list, session):
+    data_frame_all = pd.DataFrame()
+
+    for item in tqdm(data_list):
+        item = myDict(item)
+        data = {
+            'code': f'{item.key}',
+            'group': f'{item.group}',
+            'dt': f'{get_first_day_of_month()}',
+            'type': '2',
+            '_controller': 'Office_Report/buy_sku2_get_detail',
+            '_contract': f'{id}',
+            '_url': 'https://ru.siberianhealth.com/ru/office/report/buy_sku2/'
+        }
+
+        # Отправляем запрос
+        response = session.post(url=url_ajax, data=data)
+        text = response.text
+        decoded_text = bytes(text, 'utf-8').decode('unicode_escape')
+
+        # Обрабатываем ответный текст
+        soup = BeautifulSoup(decoded_text, 'html.parser')
+        decoded_text = soup.prettify().replace('&lt;', '<').replace('&gt;', '>').replace('"}}', '')
+        data_list = pd.read_html(decoded_text)
+        data_frame = pd.DataFrame(data_list[0])
+
+        # Соединяем все DataFrame
+        data_frame_all = pd.concat([data_frame_all, data_frame], ignore_index=True)
+
+    return data_frame_all
+
+
+def download_csv_data(id, session):
+    data = {
+        'filters[page]': '1',
+        'filters[perPage]': '20',
+        'filters[period]': '07.2023',
+        'filters[fromCache]': '0',
+        'filters[contract]': '',
+        'filters[search]': '',
+        'filters[group]': '0',
+        'filters[minLO]': '',
+        'filters[maxLO]': '',
+        'filters[qualificationOpen]': '0',
+        'filters[qualificationClosed]': '0',
+        'filters[newbies]': '',
+        'filters[type]': 'all',
+        'filters[sort][field]': 'lo',
+        'filters[sort][direction]': 'ASC',
+        'filters[club200]': '0',
+        'filters[club500]': '0',
+        'filters[club1000]': '0',
+        'filters[firstLine]': '1',
+        'filters[specialDiscount]': '',
+        'filters[specialGift]': '',
+        '_controller': 'Backoffice_Report_Inf/download_prepare',
+        '_contract': f'{id}',
+        '_url': 'https://ru.siberianhealth.com/ru/backoffice/report/inf/'
+    }
+
+    hash = session.post(url_ajax, data=data, allow_redirects=True)
+    hash = hash.json()['result']['hash']
+    file = session.get(f'https://ru.siberianhealth.com/ru/backoffice/report/inf/download/{hash}/')
+    df = pd.read_excel(io.BytesIO(file.content))
+    return df
+
+
+def get_data(session, url):
+    while True:
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            html_content = response.text
+            tables = pd.read_html(html_content)
+            df = tables[0]  # Получаем первую таблицу
+            # print(f"{url} -> {response.url}")
+            return df
+        except ValueError as e:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} Произошла ошибка при чтении таблиц из HTML: {e} {url}")
+            time.sleep(60)
+        except AttributeError:
+            # Обработка ошибки
+            return None
+        except Exception as e:
+            print("Произошла ошибка:", e)
+            traceback.print_exc()
+            time.sleep(60)
+
+
+
+def get_report(session, url):
+    data = {
+        'action': 'all',
+        'period': '01.07.2023',
+        'search_contract': '',
+        'lv_parent': '0',
+        'group_only': '0',
+        'show_mobil': '1',
+        'show_birthday': '1'
+    }
+    try:
+        response = session.post(url, data=data)
+        response.raise_for_status()
+        html_content = response.text
+        tables = pd.read_html(f'<table>{html_content}</table>')
+        df = tables[0]  # Получаем первую таблицу
+        df.columns = ['№', 'Номер Соглашения', 'Уровень', 'ФИО', 'E-mail', 'Телефон', 'ЛО ИМ', 'ЛО ИМ ПКН',
+                      'Дата рождения', 'ЛО', 'ЛО ПКН', 'ГО', 'ОО', 'Ранг', 'НОО', 'ЦОК', 'Примечание']
+        return df
+
+    except Exception as e:
+        print("Произошла ошибка:", e)
+        traceback.print_exc()
+
+
+def is_current_month(dataframe, column_index, date_format="%d.%m.%Y"):
+    # Извлекаем название столбца и удаляем подстроку " (на текущую дату)"
+    column_name = dataframe.columns[column_index].replace(" (на текущую дату)", "")
+
+    # Преобразуем название столбца в объект datetime с помощью функции strptime
+    column_date = datetime.strptime(column_name, date_format)
+
+    # Извлекаем текущий месяц из текущей даты с помощью функции strftime
+    current_month = datetime.now().strftime("%B")
+
+    # Сравниваем извлеченный месяц со значением текущего месяца
+    if column_date.strftime("%B") == current_month:
+        return True
+    else:
+        return False
+
+def process_user_data(start_time, request, user):
+    buy_my_team = None
+    try:
+        session = auth(user)
+        messages.success(request, f"auth {format_time(time.time() - start_time)} ")
+
+        if isinstance(session, requests.sessions.Session):
+            dataClub200 = get_data(session, club200Url)
+            messages.success(request, f"dataClub200 {format_time(time.time() - start_time)} ")
+
+            dataBonus = get_data(session, bonusUrl)
+            messages.success(request, f"dataBonus {format_time(time.time() - start_time)} ")
+
+            dataClose = get_data(session, closeUrl)
+            messages.success(request, f"dataClose {format_time(time.time() - start_time)} ")
+
+            dataClub50 = get_data(session, сlub50Url)
+            messages.success(request, f"dataClub50 {format_time(time.time() - start_time)} ")
+
+            dataNew = get_report(session, newUrl)
+            messages.success(request, f"dataNew {format_time(time.time() - start_time)} ")
+
+            dataTeam = download_csv_data( user['number'], session)
+            messages.success(request, f"download_csv_data {format_time(time.time() - start_time)} ")
+
+            # buy_my_team = buy_sku2_get_detail( user['number'], extract_data(buy_sku2_url, session=session), session=session)
+            # Выход из цикла, если все прошло успешно
+            return dataTeam, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team
+        else:
+            return session
+
+    except Exception as e:
+        print("Произошла ошибка:", e)
+        traceback.print_exc()
+        time.sleep(60)
+
+def transfer_data(row):
+    note = ''
+
+    if row['Клуб Постоянства'] and pd.notna(row['Клуб Постоянства']):
+        note += f"Club 50: {row['Клуб Постоянства']} "
+
+    elif row['Club 200']:
+        note += f"Club 200: {row['Club 200']} "
+
+    elif row['Дата последней покупки']:
+        if "нет ни одной покупки" in row['Дата последней покупки']:
+            note += "Нет покупок"
+        else :
+            note += f"Нет покупок с {row['Дата последней покупки']} "
+
+    elif row['Новичок месяца']:
+        note += f"Новичок"
+        # print(row['Регистрационный номер'])
+
+    return note.strip()
+
+def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team = None):
+    # Создание пустых списков для каждого столбца
+    new = []
+    balance = []
+    close = []
+    сlub50 = []
+    club200 = []
+    WhatsApp = []
+    birthday = []
+    new_dict = []
+
+    # Извлечение имени пользователя, используя условное выражение
+    """ Нужно подтягивать имя из базы данных для рассылки"""
+    myName = user["myName"] if user["myName"] else dataTeam.loc[dataTeam['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
+    # myName = dataTeam.loc[dataTeam['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
+
+    # Создание нового датафрейма только с нужными столбцами
+    dataTeam = dataTeam[['Регистрационный номер', 'Уровень', 'Ранг', 'ОО', 'ФИО', 'Телефон', 'ЛО']]
+
+    # Подготовка данных для скалярных запросов
+    balance_dict = dataBonus.set_index('Номер Соглашения')['Баланс'].to_dict()
+
+    birthday_dict = {str(row['Номер Соглашения']).replace('.0', ''): row['Дата рождения'] for _, row in
+                     dataNew.iterrows()}
+
+    close_dict = dataClose.set_index('Номер соглашения')['Дата последней покупки'].to_dict()
+
+    club50_dict = dataClub50.set_index('Регистрационный номер')['Месяц выполнения по 50 баллов'].to_dict()
+
+
+    new_dict = dataNew['Номер Соглашения'].tolist()
+    new_dict = [elem for elem in new_dict if '*' in elem]
+    new_dict = {str(element).replace('*', ''): 'Новичок' for element in new_dict if '*' in str(element)}
+
+    club200_dict = {}
+    if is_current_month(dataClub200, 5):
+        dataClub200.rename(columns={dataClub200.columns[5]: "на текущую дату"}, inplace=True)
+        for key, value in dataClub200.set_index('Регистрационный номер').to_dict(orient='index').items():
+            if pd.notna(value['на текущую дату']):
+                club200_dict.update({key: f"{int(value['Месяц участия в Club 200'][0]) - 1} из 6 месяцев"})
+
+    # Итерация по столбцу 'Регистрационный номер' для заполнения списков
+    for _, reg_num in dataTeam['Регистрационный номер'].items():
+        # balance.append(balance_dict.get(reg_num, ''))
+        # birthday.append(birthday_dict.get(str(reg_num), ''))
+        # close.append(close_dict.get(reg_num, ''))
+        # сlub50.append(club50_dict.get(reg_num, ''))
+        # club200.append(club200_dict.get(reg_num, ''))
+        # new.append(new_dict.get(str(reg_num), ''))
+
+        balance_value = balance_dict.get(reg_num, '')
+        birthday_value = birthday_dict.get(str(reg_num), '')
+        close_value = close_dict.get(reg_num, '')
+        сlub50_value = club50_dict.get(reg_num, '')
+        club200_value = club200_dict.get(reg_num, '')
+        new_value = new_dict.get(str(reg_num), '')
+
+        balance.append(balance_value)
+        birthday.append(birthday_value)
+        close.append(close_value)
+        сlub50.append(сlub50_value)
+        club200.append(club200_value)
+        new.append(new_value)
+
+        # print(f"Reg_num: {reg_num} | Balance: {balance_value} | Birthday: {birthday_value} | Close: {close_value} "
+        #       f"| Club50: {club50_value} | Club200: {club200_value} | New: {new_value}")
+
+    # Присвоение списков полученным значениям в датафрейме
+    dataTeam.loc[:, 'Дата рождения'] = birthday
+    dataTeam.loc[:, 'Телефон'] = dataTeam['Телефон'].str.replace('|', '')
+    dataTeam.loc[:, 'Баланс'] = balance
+    dataTeam.loc[:, 'Новичок месяца'] = new
+    dataTeam.loc[:, 'Клуб Постоянства'] = сlub50
+    dataTeam.loc[:, 'Club 200'] = club200
+    dataTeam.loc[:, 'Дата последней покупки'] = close
+
+    for index, data in dataTeam.iterrows():
+        clientName = f"{data['ФИО'].split()[1] if len(data['ФИО'].split()) > 1 else data['ФИО'].split()[0]}"
+        text = ""
+
+        if data['Новичок месяца']:
+            club = "Клуб Постоянства" if data['Ранг'] < 0 else "Клуб 200"
+
+            text = f"Здравствуйте {clientName}, Вы зарегистрировались на сайте Siberian Wellness. " \
+                   f"Я ваш личный консультант, меня зовут – {myName}. Вы можете принять участие в программе {club} " \
+                   f"и получить подарки, рассказать подробнее?"
+
+        elif data['Клуб Постоянства'] and pd.notna(data['Клуб Постоянства']):
+
+            if data['Клуб Постоянства'] == "Начислен подарок - не забрали":
+                text = f"Здравствуйте {clientName} Вам начислен сертификат на подарок по программе Клуб Постоянства. " \
+                       f"Нужна ли вам помощь при оформлении? Ваш консультант Siberian Wellness - {myName}."
+
+            elif data['ЛО'] < 50:
+                text = f"Здравствуйте {clientName}, Вы {str(data['Клуб Постоянства']).split()[0]} из 6 месяцев " \
+                       f"идете по программе Клуб постоянства, в этом месяце вы сделали {data['ЛО']} из 50. " \
+                       f"У вас на бонусном счету {data['Баланс']} Готовы ли сделать заказ? " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+
+            elif 5 - int(str(data['Клуб Постоянства']).split()[0]):
+                ending = '' if 5 - int(str(data['Клуб Постоянства']).split()[0]) == 1 else 'ев' if 5 - int(
+                    data['Клуб Постоянства'].split()[0]) == 5 else 'а'
+                text = f"Здравствуйте {clientName}, Вы выполнили условия программы Клуб постоянства в текущем месяце. " \
+                       f"Для получения подарка необходимо выполнять условия программы Клуб постоянства еще " \
+                       f"{5 - int(str(data['Клуб Постоянства'].split()[0]))} месяц {ending}. " \
+                       f"У вас на бонусном счету {data['Баланс']} Ваш консультант Siberian Wellness - {myName}."
+
+            else:
+                text = f"Здравствуйте {clientName}, Вы выполнили условия программы Клуб постоянства полностью. " \
+                       f"В начале следующего месяца вам будет начислен сертификат на подарок. " \
+                       f"У вас на бонусном счету {data['Баланс']} Ваш консультант Siberian Wellness - {myName}."
+
+        elif data['Club 200'] and pd.notna(data['Club 200']):
+            if data['ЛО'] < 200:
+                text = f"Здравствуйте {clientName}, Вы {data['Club 200']} из 6 месяцев " \
+                       f"идете по программе Club 200, в этом месяце вы сделали {data['ЛО']} из 200. " \
+                       f"У вас на бонусном счету {data['Баланс']}  Готовы ли сделать заказ? " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+            else:
+                text = f"Здравствуйте {clientName}, Вы выполнили условия программы Club 200, " \
+                       f"в начале следующего месяца будет зачислен сертификат на подарок. " \
+                       f"У вас на бонусном счету {data['Баланс']} " \
+                       f"Ваш консультант Siberian Wellness - {myName}. "
+
+        elif data['Дата последней покупки'] and pd.notna(data['Дата последней покупки']):
+            if data['Дата последней покупки'] == "нет ни одной покупки":
+                text = f"Здравствуйте {clientName}, у вас есть карта клиента Siberian Wellness, " \
+                       f"вы в течение 3 месяцев с момента регистрации не совершали покупок, " \
+                       f"сделайте заказ в этом месяце на любую сумму и сохраните карту клиента, или она будет аннулирована. " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+            else:
+                text = f"Здравствуйте {clientName}, вы не покупали продукцию в течение 5 месяцев подряд, " \
+                       f"ваш номер Соглашения будет закрыт, если покупок не будет 6 месяцев подряд. " \
+                       f"У вас на бонусном счету {data['Баланс']}, используйте их для покупки в текущем месяце, " \
+                       f"иначе они сгорят. " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+
+        elif not data['ЛО']:
+            if data['Баланс']:
+                text = f"Здравствуйте {clientName}, у вас на бонусном счету {data['Баланс']}  " \
+                       f"используйте их для покупки в текущем месяце. " \
+                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Ваш консультант Siberian Wellness - {myName}. "
+            else:
+                text = f"Здравствуйте {clientName}, Вы давно не делали заказы. " \
+                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Ваш консультант Siberian Wellness - {myName}. "
+
+        elif data['ЛО'] < 50 and data['Ранг'] < 0:
+            if data['Баланс']:
+                text = f"Здравствуйте {clientName}, у вас на бонусном счету {data['Баланс']}, " \
+                       f"используйте их для покупки в текущем месяце. " \
+                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+
+            else:
+                text = f"Здравствуйте {clientName}, Вы можете принять участие в программе  " \
+                       f"Клуб Постоянства и получить подарки, рассказать подробнее? " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+
+        elif data['ЛО'] >= 200 and data['Ранг'] < 0:
+            if data['Баланс']:
+                text = f"Здравствуйте {clientName}, Вы сделали в этом месяце {data['ЛО']} баллов и можете " \
+                       f"перейти в Бизнес партнеры совершенно бесплатно. Ваш кэшбэк увеличится до 25%, " \
+                       f"а так же сможете участвовать в программе Клуб 200 и получить подарки, рассказать подробнее? " \
+                       f"У вас на бонусном счету {data['Баланс']}, можете использовать их для покупки продукции. " \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+            else:
+                text = f"Здравствуйте {clientName}, Вы сделали в этом месяце {data['ЛО']} баллов и можете " \
+                       f"перейти в Бизнес партнеры совершенно бесплатно. Ваш кэшбэк увеличится до 25%, " \
+                       f"а так же сможете участвовать в программе Клуб 200 и получить подарки, рассказать подробнее?" \
+                       f"Ваш консультант Siberian Wellness - {myName}."
+        else:
+            text = ""
+
+        if text:
+            link = f'https://web.whatsapp.com/send/?phone={data["Телефон"]}&text={text}'
+        else:
+            link = f'https://web.whatsapp.com/send/?phone={data["Телефон"]}&text=Здравствуйте {clientName}'
+        WhatsApp.append(f'{link}')
+
+    dataTeam.loc[:, 'ОО'] = dataTeam['ОО'].replace(0, "")
+    dataTeam.loc[:, 'ЛО'] = dataTeam['ЛО'].replace(0, "")
+    dataTeam.loc[:, 'Рассылка'] = WhatsApp
+
+    # Применяем функцию к столбцу 'Примечание'
+    dataTeam['Примечание'] = dataTeam.apply(transfer_data, axis=1)
+
+    return {'dataTeam': dataTeam,'buy_my_team': buy_my_team}
+"""
+def save_tables(request, id, tables):
+    database_file = str(id)
+    with sqlite3.connect(database_file) as conn:
+        conn.execute(f"PRAGMA key='{PASSWORD}'")
+        conn.commit()
+        for table_name, table_data in tables.items():
+            try:
+                if isinstance(table_data, pd.DataFrame):
+                    table_data.to_sql(table_name, conn, if_exists='replace', index=False)
+                else:
+                    continue
+            except Exception as e:
+                print(f"Произошла ошибка при сохранении таблицы {table_name}: {e}")
+                traceback.print_exc()
+"""
+
+
+def save_tables(request, id, tables):
+    database_file = str(id)
+    with sqlite3.connect(database_file) as conn:
+        conn.execute(f"PRAGMA key='{PASSWORD}'")
+        conn.commit()
+
+        for table_name, table_data in tables.items():
+            if isinstance(table_data, pd.DataFrame):
+                try:
+                    table_data.to_sql(table_name, conn, if_exists='replace', index=False)
+                except Exception as e:
+                    print(f"Произошла ошибка при сохранении таблицы {table_name}: {e}")
+                    traceback.print_exc()
+
+
+def format_time(seconds):
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Добавляем обозначение переменным
+    hours_str = f"{int(hours)} ч" if hours != 0 else ""
+    minutes_str = f"{int(minutes)} мин" if minutes != 0 else ""
+    seconds_str = f"{int(seconds)} сек" if seconds != 0 else ""
+
+    # Форматируем время и возвращаем результат
+    formatted_time = f"{hours_str} {minutes_str} {seconds_str}".strip()
+    return formatted_time
+
+
+def backoffice(number, password, pk, name, request):
+    start_time = time.time()
+
+    try:
+        user = {'number': number, 'password': password, 'myName' : name}
+        user_data = process_user_data(start_time, request, user)
+        messages.success(request, f"process_user_data {format_time(time.time() - start_time)} ")
+
+        if isinstance(user_data, tuple):
+            tables = generate_text(request, user, *user_data)
+            messages.success(request, f"generate_text {format_time(time.time() - start_time)} ")
+            save_tables(request, pk, tables)
+            messages.success(request, f"save_tables {format_time(time.time() - start_time)} ")
+
+        else:
+            return f"Ошибка - {user_data}"
+
+    except :
+        return traceback.print_exc()
+    messages.success(request, f"Сбор данных завершен за {format_time(time.time() - start_time)} ")
+
+
+@login_required
+def table_main(request):
+    def create_link(x):
+        return f'<a href="{x}" class="btn btn-primary" target="_blank">Отправить&nbspсообщение</a>'
+
+    pk = request.user.pk
+    database_file = str(pk)
+
+    if not os.path.isfile(database_file):
+        context = {'name': 'Необходимо обновить данные', 'table_data': ""}
+        return render(request, 'main.html', context)
+
+    last_modified = datetime.fromtimestamp(os.path.getmtime(database_file)).strftime('%Y-%m-%d %H:%M:%S')
+
+    # with sqlite3.connect(database_file) as conn:
+    #     query = "SELECT * FROM dataTeam"
+    #     data_team = pd.read_sql_query(query, conn)
+
+    with sqlite3.connect(database_file) as conn:
+        conn.execute(f"PRAGMA key='{PASSWORD}'")
+        conn.commit()
+
+        cursor = conn.cursor()
+
+        # Оптимизированный запрос 1
+        query = "SELECT ФИО FROM dataTeam WHERE Уровень = 0 LIMIT 1"
+        cursor.execute(query)
+        name = cursor.fetchone()[0]
+
+        # Оптимизированный запрос 2
+        query = """
+                SELECT * FROM dataTeam 
+                WHERE 
+                    Уровень = 1 OR 
+                    Примечание LIKE '%Нет покупок%' OR
+                    Примечание LIKE '%Club%' OR
+                    Баланс != ''
+                """
+        cursor.execute(query)
+        data_team = cursor.fetchall()
+
+        column_names = [description[0] for description in cursor.description]
+        data_team = pd.DataFrame(data_team, columns=column_names)
+
+    if data_team.empty:
+        context = {'name': 'Необходимо обновить данные', 'table_data': ""}
+        return render(request, 'main.html', context)
+
+    # Копируем столбец "Баланс" в новый столбец "Новый баланс"
+    data_team['Новый баланс'] = data_team['Баланс']
+
+    # Удаляем знаки валюты и преобразуем столбец "Новый баланс" в числовой формат
+    data_team['Новый баланс'] = data_team['Новый баланс'].str.extract(r'(\d{1,3}[ ]?\d{0,3}[,]\d{2})')\
+        .replace(' ', '', regex=True).replace(',', '.', regex=True)
+
+    data_team['Новый баланс'] = pd.to_numeric(data_team['Новый баланс'], errors='coerce')
+
+    data_team.sort_values(by=['Примечание', 'Ранг', 'ОО', 'ЛО', 'Новый баланс'], ascending=False, inplace=True)
+
+    data_team['Рассылка'] = data_team['Рассылка'].apply(create_link)
+
+    data_team.loc[:, 'Ранг'] = data_team['Ранг'].replace(rankDict)
+
+    data_team = data_team[['Регистрационный номер', 'Уровень', 'Ранг', 'ОО', 'ФИО', 'Дата рождения', 'Телефон',
+                           'ЛО', 'Баланс', 'Примечание', 'Рассылка']]
+
+    table_data = html.unescape(data_team.to_html(index=False, classes='table table-striped table-hover'))
+    context = {'table_data': table_data, 'name': name, 'last_modified': last_modified}
+    return render(request, 'main.html', context)
+
+
