@@ -3,6 +3,7 @@ import html
 import io
 import os
 import sqlite3
+import concurrent.futures
 import traceback
 from io import BytesIO
 
@@ -15,7 +16,6 @@ from django.shortcuts import render
 from tqdm import tqdm
 
 from config import *
-
 
 def bypass_captcha(session):
     solver = imagecaptcha()
@@ -149,14 +149,14 @@ def get_data(session, url):
             return df
         except ValueError as e:
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} Произошла ошибка при чтении таблиц из HTML: {e} {url}")
-            time.sleep(60)
+            time.sleep(1)
         except AttributeError:
             # Обработка ошибки
             return None
         except Exception as e:
             print("Произошла ошибка:", e)
             traceback.print_exc()
-            time.sleep(60)
+            time.sleep(1)
 
 
 
@@ -203,12 +203,20 @@ def is_current_month(dataframe, column_index, date_format="%d.%m.%Y"):
 
 def process_user_data(start_time, request, user):
     buy_my_team = None
+
+    dataClub200 = None
+    dataBonus = None
+    dataClose = None
+    dataClub50 = None
+    dataNew = None
+    data_team = None
+
     try:
         session = auth(user)
         messages.success(request, f"auth {format_time(time.time() - start_time)} ")
 
         if isinstance(session, requests.sessions.Session):
-            dataClub200 = get_data(session, club200Url)
+            dataClub200 = get_data(session, club200Url, )
             messages.success(request, f"dataClub200 {format_time(time.time() - start_time)} ")
 
             dataBonus = get_data(session, bonusUrl)
@@ -223,12 +231,14 @@ def process_user_data(start_time, request, user):
             dataNew = get_report(session, newUrl)
             messages.success(request, f"dataNew {format_time(time.time() - start_time)} ")
 
-            dataTeam = download_csv_data( user['number'], session)
+            data_team = download_csv_data( user['number'], session)
             messages.success(request, f"download_csv_data {format_time(time.time() - start_time)} ")
 
             # buy_my_team = buy_sku2_get_detail( user['number'], extract_data(buy_sku2_url, session=session), session=session)
             # Выход из цикла, если все прошло успешно
-            return dataTeam, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team
+
+            # print(data_team, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team)
+            return data_team, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team
         else:
             return session
 
@@ -258,7 +268,7 @@ def transfer_data(row):
 
     return note.strip()
 
-def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team = None):
+def generate_text(request, user, data_team, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team = None):
     # Создание пустых списков для каждого столбца
     new = []
     balance = []
@@ -271,11 +281,14 @@ def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dat
 
     # Извлечение имени пользователя, используя условное выражение
     """ Нужно подтягивать имя из базы данных для рассылки"""
-    myName = user["myName"] if user["myName"] else dataTeam.loc[dataTeam['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
-    # myName = dataTeam.loc[dataTeam['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
-
+    myName = user["myName"] if user["myName"] else data_team.loc[data_team['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
+    # myName = data_team.loc[data_team['Уровень'] == 0, 'ФИО'].str.split().str[1].iloc[0]
+    data_team['Email'] = data_team['E-mail']
     # Создание нового датафрейма только с нужными столбцами
-    dataTeam = dataTeam[['Регистрационный номер', 'Уровень', 'Ранг', 'ОО', 'ФИО', 'Телефон', 'ЛО']]
+    data_team = data_team[['Регистрационный номер', 'Уровень', 'Ранг', 'ОО', 'ФИО', 'Телефон', 'ЛО', 'Email',]]
+
+    # Распечатка названий всех столбцов с помощью атрибута columns
+    # print(data_team.columns)
 
     # Подготовка данных для скалярных запросов
     balance_dict = dataBonus.set_index('Номер Соглашения')['Баланс'].to_dict()
@@ -300,7 +313,7 @@ def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dat
                 club200_dict.update({key: f"{int(value['Месяц участия в Club 200'][0]) - 1} из 6 месяцев"})
 
     # Итерация по столбцу 'Регистрационный номер' для заполнения списков
-    for _, reg_num in dataTeam['Регистрационный номер'].items():
+    for _, reg_num in data_team['Регистрационный номер'].items():
         # balance.append(balance_dict.get(reg_num, ''))
         # birthday.append(birthday_dict.get(str(reg_num), ''))
         # close.append(close_dict.get(reg_num, ''))
@@ -326,15 +339,15 @@ def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dat
         #       f"| Club50: {club50_value} | Club200: {club200_value} | New: {new_value}")
 
     # Присвоение списков полученным значениям в датафрейме
-    dataTeam.loc[:, 'Дата рождения'] = birthday
-    dataTeam.loc[:, 'Телефон'] = dataTeam['Телефон'].str.replace('|', '')
-    dataTeam.loc[:, 'Баланс'] = balance
-    dataTeam.loc[:, 'Новичок месяца'] = new
-    dataTeam.loc[:, 'Клуб Постоянства'] = сlub50
-    dataTeam.loc[:, 'Club 200'] = club200
-    dataTeam.loc[:, 'Дата последней покупки'] = close
+    data_team.loc[:, 'Дата рождения'] = birthday
+    data_team.loc[:, 'Телефон'] = data_team['Телефон'].str.replace('|', '')
+    data_team.loc[:, 'Баланс'] = balance
+    data_team.loc[:, 'Новичок месяца'] = new
+    data_team.loc[:, 'Клуб Постоянства'] = сlub50
+    data_team.loc[:, 'Club 200'] = club200
+    data_team.loc[:, 'Дата последней покупки'] = close
 
-    for index, data in dataTeam.iterrows():
+    for index, data in data_team.iterrows():
         clientName = f"{data['ФИО'].split()[1] if len(data['ФИО'].split()) > 1 else data['ФИО'].split()[0]}"
         text = ""
 
@@ -439,14 +452,15 @@ def generate_text(request, user, dataTeam, dataBonus, dataClose, dataClub50, dat
             link = f'https://web.whatsapp.com/send/?phone={data["Телефон"]}&text=Здравствуйте {clientName}'
         WhatsApp.append(f'{link}')
 
-    dataTeam.loc[:, 'ОО'] = dataTeam['ОО'].replace(0, "")
-    dataTeam.loc[:, 'ЛО'] = dataTeam['ЛО'].replace(0, "")
-    dataTeam.loc[:, 'Рассылка'] = WhatsApp
+    data_team.loc[:, 'ОО'] = data_team['ОО'].replace(0, "")
+    data_team.loc[:, 'ЛО'] = data_team['ЛО'].replace(0, "")
+    data_team.loc[:, 'Рассылка'] = WhatsApp
 
     # Применяем функцию к столбцу 'Примечание'
-    dataTeam['Примечание'] = dataTeam.apply(transfer_data, axis=1)
+    data_team['Примечание'] = data_team.apply(transfer_data, axis=1)
 
-    return {'dataTeam': dataTeam,'buy_my_team': buy_my_team}
+    return {'data_team': data_team,'buy_my_team': buy_my_team}
+
 """
 def save_tables(request, id, tables):
     database_file = str(id)
@@ -467,6 +481,7 @@ def save_tables(request, id, tables):
 
 def save_tables(request, id, tables):
     database_file = str(id)
+
     with sqlite3.connect(database_file) as conn:
         conn.execute(f"PRAGMA key='{PASSWORD}'")
         conn.commit()
@@ -530,24 +545,38 @@ def table_main(request):
 
     last_modified = datetime.fromtimestamp(os.path.getmtime(database_file)).strftime('%Y-%m-%d %H:%M:%S')
 
-    # with sqlite3.connect(database_file) as conn:
-    #     query = "SELECT * FROM dataTeam"
-    #     data_team = pd.read_sql_query(query, conn)
-
     with sqlite3.connect(database_file) as conn:
         conn.execute(f"PRAGMA key='{PASSWORD}'")
         conn.commit()
 
         cursor = conn.cursor()
 
+        # Выполнение запроса, чтобы получить все имена таблиц
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        name_table = cursor.fetchall()
+
+        if name_table[0][0] != 'data_team':
+            context = {'name': 'Необходимо обновить данные', 'table_data': ""}
+            return render(request, 'main.html', context)
+
         # Оптимизированный запрос 1
-        query = "SELECT ФИО FROM dataTeam WHERE Уровень = 0 LIMIT 1"
+        query = "SELECT ФИО, Телефон, Email FROM data_team WHERE Уровень = 0 LIMIT 1"
         cursor.execute(query)
-        name = cursor.fetchone()[0]
+        result = cursor.fetchone()
+        # Получить текущего пользователя
+        user = request.user
+        # Сохранить данные в поля пользователя
+        user.sw_name = result[0]
+        user.sw_phone = result[1]
+        user.sw_email = result[2]
+        # Сохранить изменения
+        user.save()
+
+        name = user.sw_name
 
         # Оптимизированный запрос 2
         query = """
-                SELECT * FROM dataTeam 
+                SELECT * FROM data_team 
                 WHERE 
                     Уровень = 1 OR 
                     Примечание LIKE '%Нет покупок%' OR

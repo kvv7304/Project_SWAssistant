@@ -19,7 +19,7 @@ from django.urls import path
 from . import views
 from .views import CustomLoginView
 from .views import CustomRegisterView
-from .views import my_logout
+from .views import logout_view
 
 urlpatterns = [
     path('', views.table_main, name='table_main'),
@@ -28,5 +28,5 @@ urlpatterns = [
     path('login/', CustomLoginView.as_view(), name='login'),
     path('registration/', CustomRegisterView.as_view(), name='registration'),
     path('save/', views.save, name='save'),
-    path('logout/', my_logout, name='logout_view'),
+    path('logout/', logout_view, name='logout_view'),
 ]
