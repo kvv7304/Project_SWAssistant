@@ -1,17 +1,43 @@
-from django.contrib.auth import get_user_model, authenticate, login, logout
+import datetime
 import threading
+from datetime import datetime
 
+import requests
 from django.contrib.auth import get_user_model, authenticate, login, logout
 from django.contrib.auth.views import LoginView
+from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.shortcuts import render
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, FormView
 
-from backoffice import table_main, backoffice  # noqa
+from backoffice import table_main, backoffice, auth  # noqa
 from django_app.forms import RegistrationForm, LoginForm
 
-from django.contrib import messages
+
+def load(request):
+    if request.method == 'POST':
+        user = request.user
+        test = {'number': user.sw_numer, 'password': user.sw_password}
+        error = auth(test)
+        if isinstance(error, requests.sessions.Session):
+            # Запускаем backoffice функцию в отдельном потоке
+            thread = threading.Thread(target=backoffice, args=(user.sw_numer, user.sw_password, user.pk, user.first_name, request))
+            thread.start()
+            # Открываем страницу loading
+            return render(request, 'loading.html')
+
+        else:
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            context = {
+                'table_data': None,
+                'name': error,
+                'last_modified': current_time,
+            }
+            return render(request, 'main.html', context)
+
+    return render(request, 'main.html')
+
 
 class CustomLoginView(LoginView):
     template_name = 'registration.html'
@@ -38,20 +64,6 @@ class CustomFormView(FormView):
         login(self.request, user)
         return super().form_valid(form)
 
-def load(request):
-    if request.method == 'POST':
-        user = request.user
-        error = backoffice(user.sw_numer, user.sw_password, user.pk, user.first_name, request)
-        if error:
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            context = {
-                'table_data': None,
-                'name': error,
-                'last_modified': current_time,
-            }
-            return render(request, 'main.html', context)
-        else:
-            return redirect('table_main')
 
 def save(request):
     if request.method == 'POST':
@@ -64,6 +76,16 @@ def save(request):
             return load(request)
     return render(request, 'table_main.html', {'user': request.user})
 
+
 def logout_view(request):
     logout(request)
     return redirect('table_main')
+
+
+
+
+def check_process_status(request):
+    if request.user.status:
+        return JsonResponse({'status': 'completed'})
+    else:
+        return JsonResponse({'status': 'in_progress'})

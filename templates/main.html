@@ -24,10 +24,12 @@
             border-bottom: 1px solid #ddd;
         }
     </style>
+
     <title>{{ name }}</title>
 </head>
 
 <body class="bg-light">
+
 <div class="bg-white">
 <div class="d-flex justify-content-between align-items-center">
     <h1 class="bg-white">Сводный отчет Backoffice Siberian Wellness</h1>
@@ -40,6 +42,7 @@
         {% csrf_token %}
         <!-- Здесь может быть другое содержимое формы -->
         <input type="submit" value="Обновить данные" class="btn btn-primary">
+
     </form>
     <!-- Кнопка для открытия модального окна -->
     <button type="button" class="btn btn-outline-primary m-1 mb-2 mt-2" data-bs-toggle="modal" data-bs-target="#contactModal">

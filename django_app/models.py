@@ -8,4 +8,5 @@ class User(AbstractUser):
     sw_name = models.CharField(max_length=100, default='')
     sw_phone = models.CharField(max_length=12, default='')
     sw_email = models.CharField(max_length=12, default='')
+    status = models.BooleanField(default=True)
     objects = UserManager()

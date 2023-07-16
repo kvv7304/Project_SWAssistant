@@ -29,4 +29,5 @@ urlpatterns = [
     path('registration/', CustomRegisterView.as_view(), name='registration'),
     path('save/', views.save, name='save'),
     path('logout/', logout_view, name='logout_view'),
+    path('check_process_status/', views.check_process_status, name='check_process_status'),
 ]

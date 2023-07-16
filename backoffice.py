@@ -3,19 +3,18 @@ import html
 import io
 import os
 import sqlite3
-import concurrent.futures
 import traceback
 from io import BytesIO
 
 import pandas as pd
 from anticaptchaofficial.imagecaptcha import *
 from bs4 import BeautifulSoup
-from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from tqdm import tqdm
 
 from config import *
+
 
 def bypass_captcha(session):
     solver = imagecaptcha()
@@ -149,14 +148,14 @@ def get_data(session, url):
             return df
         except ValueError as e:
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} Произошла ошибка при чтении таблиц из HTML: {e} {url}")
-            time.sleep(1)
+            time.sleep(60)
         except AttributeError:
             # Обработка ошибки
             return None
         except Exception as e:
             print("Произошла ошибка:", e)
             traceback.print_exc()
-            time.sleep(1)
+            time.sleep(60)
 
 
 
@@ -201,7 +200,7 @@ def is_current_month(dataframe, column_index, date_format="%d.%m.%Y"):
     else:
         return False
 
-def process_user_data(start_time, request, user):
+def process_user_data(user):
     buy_my_team = None
 
     dataClub200 = None
@@ -213,26 +212,19 @@ def process_user_data(start_time, request, user):
 
     try:
         session = auth(user)
-        messages.success(request, f"auth {format_time(time.time() - start_time)} ")
 
         if isinstance(session, requests.sessions.Session):
             dataClub200 = get_data(session, club200Url, )
-            messages.success(request, f"dataClub200 {format_time(time.time() - start_time)} ")
 
             dataBonus = get_data(session, bonusUrl)
-            messages.success(request, f"dataBonus {format_time(time.time() - start_time)} ")
 
             dataClose = get_data(session, closeUrl)
-            messages.success(request, f"dataClose {format_time(time.time() - start_time)} ")
 
             dataClub50 = get_data(session, сlub50Url)
-            messages.success(request, f"dataClub50 {format_time(time.time() - start_time)} ")
 
             dataNew = get_report(session, newUrl)
-            messages.success(request, f"dataNew {format_time(time.time() - start_time)} ")
 
             data_team = download_csv_data( user['number'], session)
-            messages.success(request, f"download_csv_data {format_time(time.time() - start_time)} ")
 
             # buy_my_team = buy_sku2_get_detail( user['number'], extract_data(buy_sku2_url, session=session), session=session)
             # Выход из цикла, если все прошло успешно
@@ -268,7 +260,7 @@ def transfer_data(row):
 
     return note.strip()
 
-def generate_text(request, user, data_team, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team = None):
+def generate_text(user, data_team, dataBonus, dataClose, dataClub50, dataClub200, dataNew, buy_my_team = None):
     # Создание пустых списков для каждого столбца
     new = []
     balance = []
@@ -412,18 +404,18 @@ def generate_text(request, user, data_team, dataBonus, dataClose, dataClub50, da
             if data['Баланс']:
                 text = f"Здравствуйте {clientName}, у вас на бонусном счету {data['Баланс']}  " \
                        f"используйте их для покупки в текущем месяце. " \
-                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Вам нужна консультация по продукции или информация по текущим акциям? " \
                        f"Ваш консультант Siberian Wellness - {myName}. "
             else:
                 text = f"Здравствуйте {clientName}, Вы давно не делали заказы. " \
-                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Вам нужна консультация по продукции или информация по текущим акциям? " \
                        f"Ваш консультант Siberian Wellness - {myName}. "
 
         elif data['ЛО'] < 50 and data['Ранг'] < 0:
             if data['Баланс']:
                 text = f"Здравствуйте {clientName}, у вас на бонусном счету {data['Баланс']}, " \
                        f"используйте их для покупки в текущем месяце. " \
-                       f"Вам нужна консультация по продукции или информация по текущим акция? " \
+                       f"Вам нужна консультация по продукции или информация по текущим акциям? " \
                        f"Ваш консультант Siberian Wellness - {myName}."
 
             else:
@@ -461,25 +453,9 @@ def generate_text(request, user, data_team, dataBonus, dataClose, dataClub50, da
 
     return {'data_team': data_team,'buy_my_team': buy_my_team}
 
-"""
-def save_tables(request, id, tables):
-    database_file = str(id)
-    with sqlite3.connect(database_file) as conn:
-        conn.execute(f"PRAGMA key='{PASSWORD}'")
-        conn.commit()
-        for table_name, table_data in tables.items():
-            try:
-                if isinstance(table_data, pd.DataFrame):
-                    table_data.to_sql(table_name, conn, if_exists='replace', index=False)
-                else:
-                    continue
-            except Exception as e:
-                print(f"Произошла ошибка при сохранении таблицы {table_name}: {e}")
-                traceback.print_exc()
-"""
 
 
-def save_tables(request, id, tables):
+def save_tables(id, tables):
     database_file = str(id)
 
     with sqlite3.connect(database_file) as conn:
@@ -509,26 +485,24 @@ def format_time(seconds):
     return formatted_time
 
 
-def backoffice(number, password, pk, name, request):
-    start_time = time.time()
-
+def backoffice(number, password, pk, name, request = None):
+    status = request.user
+    status.status = False
+    status.save()
     try:
         user = {'number': number, 'password': password, 'myName' : name}
-        user_data = process_user_data(start_time, request, user)
-        messages.success(request, f"process_user_data {format_time(time.time() - start_time)} ")
+        user_data = process_user_data(user)
 
         if isinstance(user_data, tuple):
-            tables = generate_text(request, user, *user_data)
-            messages.success(request, f"generate_text {format_time(time.time() - start_time)} ")
-            save_tables(request, pk, tables)
-            messages.success(request, f"save_tables {format_time(time.time() - start_time)} ")
-
+            tables = generate_text(user, *user_data)
+            save_tables(pk, tables)
         else:
             return f"Ошибка - {user_data}"
-
     except :
         return traceback.print_exc()
-    messages.success(request, f"Сбор данных завершен за {format_time(time.time() - start_time)} ")
+    status.status = True
+    status.save()
+
 
 
 @login_required
