@@ -143,6 +143,4 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 AUTH_USER_MODEL = 'django_app.User'
 
-CORS_ORIGIN_ALLOW_ALL = True # установите в True, чтобы разрешить доступ со всех источников
-CSRF_COOKIE_SECURE = True # установите в True, чтобы требовать безопасное обращение для cookie с CSRF токеном
-CSRF_TRUSTED_ORIGINS = 'https://sw-assistant.ru/'
+CSRF_TRUSTED_ORIGINS = ['https://sw-assistant.ru']
