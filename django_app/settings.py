@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-(qqr1u@$&yt$=-%&vq$ybahehe^ku*0p7%kl%%uq89g9of388*
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['sw-assistant.ru']
+ALLOWED_HOSTS = ['sw-assistant.ru', '127.0.0.1', ]
 
 
 # Application definition
@@ -142,3 +142,6 @@ BOOTSTRAP5 = {
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 AUTH_USER_MODEL = 'django_app.User'
+
+CORS_ORIGIN_ALLOW_ALL = True # установите в True, чтобы разрешить доступ со всех источников
+CSRF_COOKIE_SECURE = True # установите в True, чтобы требовать безопасное обращение для cookie с CSRF токеном
