@@ -527,11 +527,11 @@ def table_main(request):
 
         # Выполнение запроса, чтобы получить все имена таблиц
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        name_table = cursor.fetchall()
-
-        if name_table[0][0] != 'data_team':
-            context = {'name': 'Необходимо обновить данные', 'table_data': ""}
-            return render(request, 'main.html', context)
+        name_table_ = cursor.fetchall()
+	
+	#if name_table[0][0] != 'data_team':
+        #    context = {'name': 'Необходимо обновить данные - data_team', 'table_data': ""}
+        #    return render(request, 'main.html', context)
 
         # Оптимизированный запрос 1
         query = "SELECT ФИО, Телефон, Email FROM data_team WHERE Уровень = 0 LIMIT 1"
