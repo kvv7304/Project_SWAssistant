@@ -144,3 +144,5 @@ LOGIN_REDIRECT_URL = '/'
 AUTH_USER_MODEL = 'django_app.User'
 
 CSRF_TRUSTED_ORIGINS = ['https://sw-assistant.ru']
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True

@@ -79,10 +79,7 @@ def save(request):
 
 def logout_view(request):
     logout(request)
-    return redirect('table_main')
-
-
-
+    return redirect('login')
 
 def check_process_status(request):
     if request.user.status:
