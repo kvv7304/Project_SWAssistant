@@ -29,6 +29,7 @@
 </head>
 
 <body class="bg-light">
+{% block content %}
 
 <div class="bg-white">
 <div class="d-flex justify-content-between align-items-center">
@@ -138,7 +139,7 @@
 
 <!-- Подключение JS Bootstrap 5 -->
 {% bootstrap_javascript %}
-
+{% endblock %}
 </body>
 
 </html>
