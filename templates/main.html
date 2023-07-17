@@ -50,7 +50,10 @@
         Настройки
     </button>
 
-    <a href="{% url 'logout_view' %}" class="btn btn-outline-danger m-1 mb-2 mt-2">Выход</a>
+<form id="logout-form" method="post" action="/logout/">
+  {% csrf_token %}
+  <button type="submit"  class="btn btn-outline-danger m-1 mb-2 mt-2" >Выйти</button>
+</form>
 
     <!-- Модальное окно -->
     <div class="modal fade " id="contactModal" tabindex="-1" aria-labelledby="contactModalLabel" aria-hidden="true">

@@ -78,8 +78,12 @@ def save(request):
 
 
 def logout_view(request):
-    logout(request)
-    return redirect('table_main')
+    if request.method == 'POST':
+        logout(request)
+        return redirect('table_main')
+    else:
+        # Возможно, что-то делаете, если запрос не является POST
+        return render(request, 'logout.html')
 
 def check_process_status(request):
     if request.user.status:
