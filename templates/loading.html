@@ -1,11 +1,64 @@
+{% load static %}
 <!DOCTYPE html>
 <html>
+{% load django_bootstrap5 %}
+
 <head>
-    <title>Loading</title>
+    <!-- Подключение CSS Bootstrap 5 -->
+    {% bootstrap_css %}
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background-color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* CSS стили для анимированной загрузки */
+        .loader-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .loader {
+            border: 16px solid #f3f3f3;
+            border-top: 16px solid #3498db;
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+
+    <title>Загрузка данных, может занять до 2-5 минут.</title>
 </head>
-<body>
-    <h1>Loading...</h1>
+
+<body class="bg-light">
+
+<div class="loader-container">
+    <div class="loader"></div>
+</div>
+
 
 <script>
     // Проверяем каждую секунду, завершился ли процесс
@@ -30,7 +83,9 @@
     $(document).ready(function() {
         checkProcess();
     });
+
 </script>
 
+<script src="{% static 'js/bootstrap.min.js' %}"></script>
 </body>
 </html>

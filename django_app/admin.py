@@ -9,6 +9,6 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 class CustomUserAdmin(UserAdmin):
-    list_display = ('username', 'first_name', 'sw_name', 'sw_phone', 'sw_email','sw_numer', 'sw_password')
+    list_display = ('username', 'first_name', 'sw_name', 'sw_phone', 'sw_email','sw_numer', 'date_joined')
 
 admin.site.register(User, CustomUserAdmin)

@@ -16,19 +16,23 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from django.views.generic.base import RedirectView
 
 from . import views
 from .views import CustomLoginView
 from .views import CustomRegisterView
 from .views import logout_view
 
+from django.urls import re_path
+
 urlpatterns = [
     path('', views.table_main, name='table_main'),
     path('admin/', admin.site.urls),
+    path('check_process_status/', views.check_process_status, name='check_process_status'),
     path('load/', views.load, name='load'),
     path('login/', CustomLoginView.as_view(), name='login'),
+    path('logout/', logout_view, name='logout_view'),
     path('registration/', CustomRegisterView.as_view(), name='registration'),
     path('save/', views.save, name='save'),
-    path('logout/', logout_view, name='logout_view'),
-    path('check_process_status/', views.check_process_status, name='check_process_status'),
+    re_path(r'favicon\.ico$', RedirectView.as_view(url='/favicon.ico', permanent=True)),
 ]

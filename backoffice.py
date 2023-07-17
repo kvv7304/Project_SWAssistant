@@ -440,8 +440,12 @@ def generate_text(user, data_team, dataBonus, dataClose, dataClub50, dataClub200
 
         if text:
             link = f'https://web.whatsapp.com/send/?phone={data["Телефон"]}&text={text}'
+            # link = f'https://api.whatsapp.com/send/?phone={data["Телефон"]}&text={text}'
+
         else:
             link = f'https://web.whatsapp.com/send/?phone={data["Телефон"]}&text=Здравствуйте {clientName}'
+            # link = f'https://api.whatsapp.com/send/?phone={data["Телефон"]}&text=Здравствуйте {clientName}'
+
         WhatsApp.append(f'{link}')
 
     data_team.loc[:, 'ОО'] = data_team['ОО'].replace(0, "")
