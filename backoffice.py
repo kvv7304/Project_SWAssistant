@@ -39,8 +39,14 @@ def auth(user, url="https://ru.siberianhealth.com/ru/backoffice-new/?newStyle=ye
     }
     with requests.Session() as session:
         while True :
-            response = session.post(url=url_ajax, data=payload, allow_redirects=True)
-            response_json = response.json()
+            try:
+                response = session.post(url=url_ajax, data=payload, allow_redirects=True)
+                response_json = response.json()
+            except Exception as e:
+                print("Произошла ошибка:", e)
+                traceback.print_exc()
+                time.sleep(60)
+                continue
             if response_json['result']['status'] == "Denied":
                 payload["captcha"] = bypass_captcha(session)
             else:
@@ -48,11 +54,9 @@ def auth(user, url="https://ru.siberianhealth.com/ru/backoffice-new/?newStyle=ye
         if response_json['result']['success'] and "Стать Бизнес-Партнером" not in session.get(url=url).text:
             return session
         elif "Стать Бизнес-Партнером" in session.get(url=url).text:
-            return f"{ user['number']} нужно стать Бизнес-Партнером"
+            return f"{user['number']} нужно стать Бизнес-Партнером"
         else:
-            return f"{ user['number']} {response_json['result']['status']}"
-
-
+            return f"{user['number']} {response_json['result']['status']}"
 
 def extract_data(url, session) -> list:
     response = session.get(url=url, allow_redirects=True)
@@ -63,11 +67,10 @@ def extract_data(url, session) -> list:
         group = a.get('data-group')
         data = {"key": key, "group": group}
         data_list.append(data)
-
     return data_list
 
-def get_first_day_of_month():
-    return datetime.date.today().strftime('%Y-%m-01')
+def get_current_period(format):
+    return datetime.now().strftime(format)
 
 def buy_sku2_get_detail(id, data_list, session):
     data_frame_all = pd.DataFrame()
@@ -77,7 +80,7 @@ def buy_sku2_get_detail(id, data_list, session):
         data = {
             'code': f'{item.key}',
             'group': f'{item.group}',
-            'dt': f'{get_first_day_of_month()}',
+            'dt': f'{get_current_period("%Y-%m-01")}',
             'type': '2',
             '_controller': 'Office_Report/buy_sku2_get_detail',
             '_contract': f'{id}',
@@ -100,12 +103,11 @@ def buy_sku2_get_detail(id, data_list, session):
 
     return data_frame_all
 
-
 def download_csv_data(id, session):
     data = {
         'filters[page]': '1',
         'filters[perPage]': '20',
-        'filters[period]': '07.2023',
+        'filters[period]': f'{get_current_period("%m.%Y")}',
         'filters[fromCache]': '0',
         'filters[contract]': '',
         'filters[search]': '',
@@ -136,33 +138,10 @@ def download_csv_data(id, session):
     return df
 
 
-def get_data(session, url):
-    while True:
-        try:
-            response = session.get(url)
-            response.raise_for_status()
-            html_content = response.text
-            tables = pd.read_html(html_content)
-            df = tables[0]  # Получаем первую таблицу
-            # print(f"{url} -> {response.url}")
-            return df
-        except ValueError as e:
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))} Произошла ошибка при чтении таблиц из HTML: {e} {url}")
-            time.sleep(60)
-        except AttributeError:
-            # Обработка ошибки
-            return None
-        except Exception as e:
-            print("Произошла ошибка:", e)
-            traceback.print_exc()
-            time.sleep(60)
-
-
-
 def get_report(session, url):
     data = {
         'action': 'all',
-        'period': '01.07.2023',
+        'period': f'{get_current_period("01.%m.%Y")}',
         'search_contract': '',
         'lv_parent': '0',
         'group_only': '0',
@@ -178,22 +157,17 @@ def get_report(session, url):
         df.columns = ['№', 'Номер Соглашения', 'Уровень', 'ФИО', 'E-mail', 'Телефон', 'ЛО ИМ', 'ЛО ИМ ПКН',
                       'Дата рождения', 'ЛО', 'ЛО ПКН', 'ГО', 'ОО', 'Ранг', 'НОО', 'ЦОК', 'Примечание']
         return df
-
     except Exception as e:
         print("Произошла ошибка:", e)
         traceback.print_exc()
 
-
 def is_current_month(dataframe, column_index, date_format="%d.%m.%Y"):
     # Извлекаем название столбца и удаляем подстроку " (на текущую дату)"
     column_name = dataframe.columns[column_index].replace(" (на текущую дату)", "")
-
     # Преобразуем название столбца в объект datetime с помощью функции strptime
     column_date = datetime.strptime(column_name, date_format)
-
     # Извлекаем текущий месяц из текущей даты с помощью функции strftime
     current_month = datetime.now().strftime("%B")
-
     # Сравниваем извлеченный месяц со значением текущего месяца
     if column_date.strftime("%B") == current_month:
         return True
@@ -214,6 +188,7 @@ def process_user_data(user):
         session = auth(user)
 
         if isinstance(session, requests.sessions.Session):
+
             dataClub200 = get_data(session, club200Url, )
 
             dataBonus = get_data(session, bonusUrl)
@@ -457,24 +432,6 @@ def generate_text(user, data_team, dataBonus, dataClose, dataClub50, dataClub200
 
     return {'data_team': data_team,'buy_my_team': buy_my_team}
 
-
-
-def save_tables(id, tables):
-    database_file = str(id)
-
-    with sqlite3.connect(database_file) as conn:
-        conn.execute(f"PRAGMA key='{PASSWORD}'")
-        conn.commit()
-
-        for table_name, table_data in tables.items():
-            if isinstance(table_data, pd.DataFrame):
-                try:
-                    table_data.to_sql(table_name, conn, if_exists='replace', index=False)
-                except Exception as e:
-                    print(f"Произошла ошибка при сохранении таблицы {table_name}: {e}")
-                    traceback.print_exc()
-
-
 def format_time(seconds):
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -507,6 +464,18 @@ def backoffice(number, password, pk, name, request = None):
     status.status = True
     status.save()
 
+def save_tables(pk, tables):
+    database_file = str(pk)
+
+    with sqlite3.connect(database_file) as conn:
+
+        for table_name, table_data in tables.items():
+            if isinstance(table_data, pd.DataFrame):
+                try:
+                    table_data.to_sql(table_name, conn, if_exists='replace', index=False)
+                except Exception as e:
+                    print(f"Произошла ошибка при сохранении таблицы {table_name}: {e}")
+                    traceback.print_exc()
 
 
 @login_required
@@ -524,9 +493,6 @@ def table_main(request):
     last_modified = datetime.fromtimestamp(os.path.getmtime(database_file)).strftime('%Y-%m-%d %H:%M:%S')
 
     with sqlite3.connect(database_file) as conn:
-        conn.execute(f"PRAGMA key='{PASSWORD}'")
-        conn.commit()
-
         cursor = conn.cursor()
 
         # Оптимизированный запрос 1
@@ -546,9 +512,9 @@ def table_main(request):
 
         # Оптимизированный запрос 2
         query = """
-                SELECT * FROM data_team 
-                WHERE 
-                    Уровень = 1 OR 
+                SELECT * FROM data_team
+                WHERE
+                    Уровень = 1 OR
                     Примечание LIKE '%Нет покупок%' OR
                     Примечание LIKE '%Club%' OR
                     Баланс != ''
@@ -584,5 +550,3 @@ def table_main(request):
     table_data = html.unescape(data_team.to_html(index=False, classes='table table-striped table-hover'))
     context = {'table_data': table_data, 'name': name, 'last_modified': last_modified}
     return render(request, 'main.html', context)
-
-
